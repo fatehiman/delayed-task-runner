@@ -1,0 +1,3 @@
+reference-docs/ export-ignore
+*.md export-ignore
+*.txt text eol=crlf

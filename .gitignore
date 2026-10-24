@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+*.user
+.vs/
+DelayedTaskRunner.txt
+*.log
+*.log.old

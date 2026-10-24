@@ -1,0 +1,7 @@
+#KIMIA10
+#format: hh:mm:ss,task[,status]
+#status: 0=normal  1=minimized  2=hidden
+00:00:05,C:\Windows\System32\notepad.exe
+00:00:10,"C:\Program Files\Some App\app.exe" --flag value,1
+00:00:15,"E:\scripts\start.bat",2
+#00:00:20,E:\old\disabled.exe
