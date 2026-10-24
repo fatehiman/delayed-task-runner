@@ -5,9 +5,9 @@ namespace DelayedTaskRunner;
 /// <summary>
 /// Runner mode: shows a tray icon and starts the enabled tasks one by one at their time
 /// (time after app start). Exits when all tasks are started.
-/// Left click on the icon = pause and ask Continue/Cancel.
+/// Left click on the icon = pause and open the pause window (Continue / Next / Ignore this / Exit).
 /// </summary>
-internal sealed class TrayRunner : ApplicationContext
+internal sealed class TrayRunner : ApplicationContext, IPauseHost
 {
     private const int TickMs = 250;
     private static readonly TimeSpan NotifyShowTime = TimeSpan.FromSeconds(6);
@@ -22,9 +22,10 @@ internal sealed class TrayRunner : ApplicationContext
     private readonly int _total;
     private int _next;
 
-    // The task clock: it stops while paused or while the Continue/Cancel dialog is open.
+    // The task clock: it stops while paused or while the pause window is open.
     private readonly Stopwatch _clock = new();
     private bool _dialogOpen;
+    private PauseForm? _pauseForm;
     private DateTime _finishedAt = DateTime.MinValue;
     private DateTime _lastNotify = DateTime.MinValue;
     private bool _exiting;
@@ -53,7 +54,7 @@ internal sealed class TrayRunner : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true,
         };
-        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) AskContinueOrCancel(); };
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowPauseWindow(); };
 
         // Hidden window, so WM_CLOSE (for example from a stop script or Windows logoff) closes the app cleanly.
         _window = new HiddenWindow(() => Quit("Close message received."));
@@ -93,6 +94,7 @@ internal sealed class TrayRunner : ApplicationContext
 
         if (_next >= _queue.Count)
         {
+            if (_dialogOpen) return; // The last tasks were started by hand; wait until the window closes.
             // All started. Wait a little if a notification was just shown, so the user can read it.
             if (_finishedAt == DateTime.MinValue)
             {
@@ -157,41 +159,56 @@ internal sealed class TrayRunner : ApplicationContext
         else _clock.Start();
     }
 
-    private void AskContinueOrCancel()
+    // IPauseHost: used by the pause window (manual mode).
+    TaskItem? IPauseHost.NextTask => _next < _queue.Count ? _queue[_next] : null;
+    int IPauseHost.Done => _next;
+    int IPauseHost.Total => _total;
+
+    async Task<string?> IPauseHost.RunNextAsync()
     {
-        if (_dialogOpen || _exiting || _next >= _queue.Count) return;
+        var task = _queue[_next++];
+        Logger.Write($"Next clicked. Running '{task.Command}' ({task.Status})...");
+        var error = await Launcher.RunAsync(task);
+        Logger.Write(error == null ? "Done." : "Error: " + error);
+        UpdateTooltip();
+        return error;
+    }
+
+    void IPauseHost.SkipNext()
+    {
+        Logger.Write($"Ignore clicked. Skipped '{_queue[_next++].Command}'.");
+        UpdateTooltip();
+    }
+
+    private void ShowPauseWindow()
+    {
+        if (_exiting || _next >= _queue.Count) return;
+        if (_pauseForm != null)
+        {
+            _pauseForm.Activate();
+            return;
+        }
 
         _dialogOpen = true;
         UpdateClock();
         UpdateTooltip();
         Logger.Write("Paused by click on tray icon.");
 
-        var btnContinue = new TaskDialogButton("Continue");
-        var btnCancel = new TaskDialogButton("Cancel");
-        var page = new TaskDialogPage
-        {
-            Caption = Program.AppName,
-            Heading = "Starting apps is paused.",
-            Text = $"{_next} of {_total} tasks are started.\n\n" +
-                   "Continue: start the remaining apps.\n" +
-                   "Cancel: close DelayedTaskRunner (the remaining apps will not start).",
-            Icon = TaskDialogIcon.Information,
-            Buttons = { btnContinue, btnCancel },
-            DefaultButton = btnContinue,
-            AllowCancel = true,
-        };
-
-        TaskDialogButton result;
+        PauseForm.Choice result;
         try
         {
-            result = TaskDialog.ShowDialog(_window.Handle, page, TaskDialogStartupLocation.CenterScreen);
+            using var form = _pauseForm = new PauseForm(this);
+            form.ShowDialog(_window);
+            result = form.Result;
         }
         finally
         {
+            _pauseForm = null;
             _dialogOpen = false;
         }
+        if (_exiting) return;
 
-        if (result == btnContinue)
+        if (result == PauseForm.Choice.Continue)
         {
             Logger.Write("Continue clicked.");
             _pauseItem.Checked = false; // Continue also ends a Pause from the menu.
@@ -200,7 +217,7 @@ internal sealed class TrayRunner : ApplicationContext
         }
         else
         {
-            Quit($"Cancel clicked. {_total - _next} tasks will not run.");
+            Quit($"Exit clicked. {_total - _next} tasks will not run.");
         }
     }
 
@@ -231,6 +248,7 @@ internal sealed class TrayRunner : ApplicationContext
         _exiting = true;
         if (reason != null) Logger.Write(reason);
         _timer.Stop();
+        _pauseForm?.Close();
         _tray.Visible = false;
         _tray.Dispose();
         _window.Dispose();

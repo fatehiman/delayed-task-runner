@@ -18,15 +18,22 @@ DelayedTaskRunner.exe
 - Starts every enabled task at its time. If two tasks have the same time, they start one after another (250 ms apart).
 - If a file does not exist, it shows a Windows notification and **goes on** (it does not stop or pause).
 - When all tasks are started, the app exits (the tray icon goes away).
-- **Left click** on the tray icon: pauses and asks **Continue** or **Cancel**.
-  - Continue: start the remaining apps.
-  - Cancel: close the app. The remaining apps do not start.
+- **Left click** on the tray icon: pauses and opens the pause window (manual mode).
+  It shows how many tasks are done and `Next: <command>` (the task that Next or Ignore will use).
+  - **Continue**: close the window and go on by time (also unchecks Pause).
+  - **Next** (or Enter): start the next task now, even if its time has not come.
+    The buttons are disabled until the program is launched (it does not wait for the program's window).
+    Then the window shows the result (`Started: ...` or the error) and the new next task.
+  - **Ignore this**: skip the next task (it will not run).
+  - **Exit**: close the app. The remaining apps do not start.
+  - The X button or Esc = Continue.
+  - When no tasks are left, Next and Ignore are disabled. Continue or Exit then closes the app.
 - **Right click** menu:
   - **Pause** (checkmark): pause until you uncheck it. No dialog.
   - **Auto start** (checkmark): adds/removes the app in
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, so it starts after login.
   - **Exit**: close the app now.
-- While paused (menu or dialog), the task clock stops. Remaining tasks keep their distance from each other.
+- While paused (menu or pause window), the task clock stops. Remaining tasks keep their distance from each other.
 
 ### 2. Editor mode (any argument)
 

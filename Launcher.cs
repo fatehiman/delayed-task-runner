@@ -52,6 +52,20 @@ internal static class Launcher
         return null;
     }
 
+    /// <summary>Same as <see cref="Run"/>, on a background STA thread, so the UI stays responsive.</summary>
+    public static Task<string?> RunAsync(TaskItem task)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        var thread = new Thread(() =>
+        {
+            try { tcs.SetResult(Run(task)); }
+            catch (Exception ex) { tcs.SetResult(ex.Message); }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return tcs.Task;
+    }
+
     /// <summary>Starts the task. Returns null on success, or an error text.</summary>
     public static string? Run(TaskItem task)
     {

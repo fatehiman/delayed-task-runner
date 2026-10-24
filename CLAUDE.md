@@ -5,7 +5,9 @@ C# .NET 8 WinForms rewrite of an old VB6 tray app. See [README.md](README.md) fo
 ## Files
 
 - `Program.cs` – single-instance mutex, picks the mode (no args = runner, any arg = editor), paths.
-- `TrayRunner.cs` – runner mode: tray icon, menu, task clock (pausable `Stopwatch`), Continue/Cancel `TaskDialog`, hidden window for clean `WM_CLOSE`.
+- `TrayRunner.cs` – runner mode: tray icon, menu, task clock (pausable `Stopwatch`), opens `PauseForm` on left click, hidden window for clean `WM_CLOSE`.
+- `PauseForm.cs` – pause window (manual mode): Continue / Next / Ignore this / Exit. Talks to the runner via `IPauseHost`.
+  Next launches on a background STA thread (`Launcher.RunAsync`) and waits only for the launch.
 - `EditorForm.cs` – editor mode: `ListView` with checkboxes, right-click Run / Open folder, Save/Cancel.
 - `TaskFile.cs` – parse/save `DelayedTaskRunner.txt`. Save only changes the `#` of changed task lines; CRLF, no BOM.
 - `Launcher.cs` – splits command into file + args, resolves it (also via PATH), starts it with `ShellExecuteEx` (no-focus show modes).
