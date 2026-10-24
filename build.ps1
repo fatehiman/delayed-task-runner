@@ -1,6 +1,6 @@
 # Builds dist\DelayedTaskRunner.exe (single file, needs .NET 8 Desktop Runtime).
 # Use -Install to also replace E:\appServices\DelayedTaskRunnerHome\DelayedTaskRunner.exe
-# (the old exe is renamed to DelayedTaskRunner.exe.bak-<date> first).
+# (the old exe is renamed to DelayedTaskRunner.exe.old first, overwriting an older .old).
 param([switch]$Install)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -18,9 +18,8 @@ if ($Install) {
     $target = Join-Path $home2 'DelayedTaskRunner.exe'
     if (Test-Path $stop) { & $stop -Path $target }
     if (Test-Path $target) {
-        $bak = "$target.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
-        Rename-Item $target (Split-Path $bak -Leaf)
-        Write-Host "Old exe renamed to $bak"
+        Move-Item $target "$target.old" -Force
+        Write-Host "Old exe renamed to $target.old"
     }
     Copy-Item (Join-Path $dist 'DelayedTaskRunner.exe') $target
     Write-Host "Installed $target"

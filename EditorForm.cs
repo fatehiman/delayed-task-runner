@@ -39,8 +39,11 @@ internal sealed class EditorForm : Form
 
         var runItem = new ToolStripMenuItem("Run");
         runItem.Click += (_, _) => RunSelected();
+        var folderItem = new ToolStripMenuItem("Open folder");
+        folderItem.Click += (_, _) => OpenFolderOfSelected();
         var menu = new ContextMenuStrip();
         menu.Items.Add(runItem);
+        menu.Items.Add(folderItem);
         menu.Opening += (_, e) => e.Cancel = _list.SelectedItems.Count == 0;
         _list.ContextMenuStrip = menu;
         _list.MouseDown += (_, e) =>
@@ -117,6 +120,31 @@ internal sealed class EditorForm : Form
         catch (Exception ex) { error = ex.Message; }
 
         Logger.Write(error == null ? "Done." : "Error: " + error);
+        if (error != null)
+            MessageBox.Show(this, error, Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    /// <summary>Opens Explorer with the task's file selected (or the nearest existing folder if the file is missing).</summary>
+    private void OpenFolderOfSelected()
+    {
+        if (_list.SelectedItems.Count == 0 || _list.SelectedItems[0].Tag is not TaskItem task) return;
+
+        var (file, _) = Launcher.Split(task.Command);
+        var full = Launcher.Resolve(file);
+        string? error;
+        if (full != null)
+        {
+            error = Native.ShellExecute("explorer.exe", $"/select,\"{full}\"", null, 1);
+        }
+        else
+        {
+            var dir = Path.GetDirectoryName(Environment.ExpandEnvironmentVariables(file));
+            while (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) dir = Path.GetDirectoryName(dir);
+            error = string.IsNullOrEmpty(dir)
+                ? $"Folder not found: {file}"
+                : Native.ShellExecute("explorer.exe", $"\"{dir}\"", null, 1);
+        }
+
         if (error != null)
             MessageBox.Show(this, error, Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }

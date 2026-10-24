@@ -39,6 +39,8 @@ DelayedTaskRunner.exe /edit
 - A red line = the file was not found.
 - Checked = enabled. Unchecked = the line is commented out with `#`.
 - Right click on a task > **Run**: start that task now.
+- Right click on a task > **Open folder**: open the task's folder in File Explorer, with the file selected.
+  If the file does not exist, it opens the nearest folder that exists.
 - **Save**: write the file and close. **Cancel** (or the X button): close without saving.
 - Save changes only the `#` in front of the changed lines. All other lines (comments, order, spacing) stay the same.
 
@@ -78,7 +80,7 @@ Needs the .NET 8 SDK. The exe needs the .NET 8 Desktop Runtime.
 ```powershell
 .\build.ps1            # builds dist\DelayedTaskRunner.exe
 .\build.ps1 -Install   # also replaces E:\appServices\DelayedTaskRunnerHome\DelayedTaskRunner.exe
-                       # (the old exe is renamed to DelayedTaskRunner.exe.bak-<date>)
+                       # (the old exe is renamed to DelayedTaskRunner.exe.old)
 ```
 
 `tools\make-icon.ps1` creates `app.ico`.
