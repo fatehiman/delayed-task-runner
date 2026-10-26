@@ -83,6 +83,7 @@ Only one copy of the app can run (in both modes). A second copy shows "DelayedTa
 ## Log
 
 `DelayedTaskRunner.log` in the same folder. One line per event (start, each task, errors, pause, exit).
+If the app crashes, it shows an error box and writes a `CRASH:` line with the full error text.
 When it is bigger than 1 MB, it is renamed to `DelayedTaskRunner.log.old` at the next start.
 
 ## Build

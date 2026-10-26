@@ -18,23 +18,41 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Logger.Init(Paths.LogFile);
 
-        if (args.Length > 0)
+        // A crash must leave the full error text in the log (not only a dialog).
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => ReportCrash(e.Exception);
+
+        try
         {
-            // Editor mode: list all tasks, check/uncheck, run by hand.
-            Logger.Write("Editor mode started.");
-            Application.Run(new EditorForm());
-            Logger.Write("Editor mode closed.");
+            if (args.Length > 0)
+            {
+                // Editor mode: list all tasks, check/uncheck, run by hand.
+                Logger.Write("Editor mode started.");
+                Application.Run(new EditorForm());
+                Logger.Write("Editor mode closed.");
+            }
+            else
+            {
+                // Runner mode: tray icon, start tasks by their time, then exit.
+                Logger.Write("App started.");
+                Application.Run(new TrayRunner());
+                Logger.Write("App exited.");
+            }
         }
-        else
+        catch (Exception ex)
         {
-            // Runner mode: tray icon, start tasks by their time, then exit.
-            Logger.Write("App started.");
-            Application.Run(new TrayRunner());
-            Logger.Write("App exited.");
+            ReportCrash(ex);
+            return 2;
         }
 
         GC.KeepAlive(mutex);
         return 0;
+    }
+
+    private static void ReportCrash(Exception ex)
+    {
+        Logger.Write("CRASH: " + ex);
+        Native.ShowError($"{AppName} error:\n\n{ex.Message}\n\nDetails are in the log:\n{Paths.LogFile}");
     }
 }
 

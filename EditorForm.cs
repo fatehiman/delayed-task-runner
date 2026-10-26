@@ -61,6 +61,7 @@ internal sealed class EditorForm : Form
         };
 
         _icons = new ImageList { ColorDepth = ColorDepth.Depth32Bit, ImageSize = SystemInformation.SmallIconSize };
+        _ = _icons.Handle; // create the handle now: before that, Images.Add only keeps a reference to our bitmap (we dispose it)
         _list.SmallImageList = _icons;
 
         var save = new Button { Text = "Save", AutoSize = true, MinimumSize = new Size(90, 30) };
