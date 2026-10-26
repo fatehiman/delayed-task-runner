@@ -48,6 +48,8 @@ DelayedTaskRunner.exe /edit
 - Right click on a task > **Run**: start that task now.
 - Right click on a task > **Open folder**: open the task's folder in File Explorer, with the file selected.
   If the file does not exist, it opens the nearest folder that exists.
+- **Fetch icons**: reads the icon of every task's file (checked and unchecked) and shows it at the left of the item.
+  Files that are not found get no icon. The icons are not saved; click the button again next time.
 - **Save**: write the file and close. **Cancel** (or the X button): close without saving.
 - Save changes only the `#` in front of the changed lines. All other lines (comments, order, spacing) stay the same.
 

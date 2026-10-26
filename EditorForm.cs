@@ -9,6 +9,9 @@ internal sealed class EditorForm : Form
 {
     private readonly ListView _list;
     private readonly TaskFile? _file;
+    private readonly ImageList _icons;
+    private readonly Button _fetch;
+    private readonly Label _fetchStatus;
 
     public EditorForm()
     {
@@ -57,10 +60,16 @@ internal sealed class EditorForm : Form
             }
         };
 
+        _icons = new ImageList { ColorDepth = ColorDepth.Depth32Bit, ImageSize = SystemInformation.SmallIconSize };
+        _list.SmallImageList = _icons;
+
         var save = new Button { Text = "Save", AutoSize = true, MinimumSize = new Size(90, 30) };
         var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(90, 30) };
+        _fetch = new Button { Text = "Fetch icons", AutoSize = true, MinimumSize = new Size(90, 30) };
+        _fetchStatus = new Label { AutoSize = true, Margin = new Padding(12, 8, 3, 0) };
         save.Click += (_, _) => SaveAndClose();
         cancel.Click += (_, _) => Close();
+        _fetch.Click += (_, _) => FetchIcons();
         AcceptButton = save;
         CancelButton = cancel;
 
@@ -73,6 +82,8 @@ internal sealed class EditorForm : Form
         };
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(save);
+        buttons.Controls.Add(_fetch);
+        buttons.Controls.Add(_fetchStatus);
 
         Controls.Add(_list);
         Controls.Add(buttons);
@@ -108,6 +119,49 @@ internal sealed class EditorForm : Form
             _list.Items.Add(item);
         }
         _list.EndUpdate();
+    }
+
+    /// <summary>
+    /// Reads the icon of every task's file (checked and unchecked) and shows it at the left of the item.
+    /// The slow part (disk / network access) runs on a background thread. Files that are not found get no icon.
+    /// </summary>
+    private async void FetchIcons()
+    {
+        var work = _list.Items.Cast<ListViewItem>().Select(i => (Item: i, Command: ((TaskItem)i.Tag!).Command)).ToList();
+        _fetch.Enabled = false;
+        _fetchStatus.Text = "Fetching icons...";
+
+        var found = await Task.Run(() =>
+        {
+            var cache = new Dictionary<string, Bitmap?>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<(ListViewItem Item, string Path, Bitmap Icon)>();
+            foreach (var (item, command) in work)
+            {
+                var full = Launcher.Resolve(Launcher.Split(command).File);
+                if (full == null) continue;
+                if (!cache.TryGetValue(full, out var icon))
+                {
+                    try { icon = Native.GetSmallIcon(full); }
+                    catch { icon = null; }
+                    cache[full] = icon;
+                }
+                if (icon != null) result.Add((item, full, icon));
+            }
+            return result;
+        });
+
+        if (IsDisposed) return;
+        _list.BeginUpdate();
+        foreach (var (item, path, icon) in found)
+        {
+            if (!_icons.Images.ContainsKey(path)) _icons.Images.Add(path, icon);
+            item.ImageKey = path;
+        }
+        _list.EndUpdate();
+        foreach (var icon in found.Select(f => f.Icon).Distinct()) icon.Dispose();
+
+        _fetchStatus.Text = $"Icons: {found.Count} of {work.Count}";
+        _fetch.Enabled = true;
     }
 
     private void RunSelected()
