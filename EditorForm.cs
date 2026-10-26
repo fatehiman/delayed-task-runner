@@ -120,14 +120,13 @@ internal sealed class EditorForm : Form
 
             // Saved icon from an earlier "Fetch icons" (no check if the file changed).
             var key = IconCache.KeyFor(t.Command);
-            if (_icons.Images.ContainsKey(key))
-                item.ImageKey = key;
-            else if (IconCache.Load(key) is { } saved)
+            if (!_icons.Images.ContainsKey(key) && IconCache.Load(key) is { } saved)
             {
                 _icons.Images.Add(key, saved);
                 saved.Dispose();
-                item.ImageKey = key;
             }
+            if (_icons.Images.ContainsKey(key))
+                item.ImageIndex = _icons.Images.IndexOfKey(key);
         }
         _list.EndUpdate();
     }
@@ -170,9 +169,20 @@ internal sealed class EditorForm : Form
         _list.BeginUpdate();
         foreach (var (item, key, icon) in found)
         {
-            _icons.Images.RemoveByKey(key); // a new fetch replaces the old image
-            _icons.Images.Add(key, icon);
-            item.ImageKey = key;
+            // Never remove an image: that moves the index of the images after it, and the items would show the wrong icons.
+            // A new fetch replaces the old image at the same index.
+            int index = _icons.Images.IndexOfKey(key);
+            if (index < 0)
+            {
+                _icons.Images.Add(key, icon);
+                index = _icons.Images.IndexOfKey(key);
+            }
+            else
+            {
+                _icons.Images[index] = icon;
+                _icons.Images.SetKeyName(index, key);
+            }
+            item.ImageIndex = index;
         }
         _list.EndUpdate();
         foreach (var icon in found.Select(f => f.Icon).Distinct()) icon.Dispose();
