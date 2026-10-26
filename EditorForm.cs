@@ -117,13 +117,25 @@ internal sealed class EditorForm : Form
                 item.ToolTipText = "File not found: " + file;
             }
             _list.Items.Add(item);
+
+            // Saved icon from an earlier "Fetch icons" (no check if the file changed).
+            var key = IconCache.KeyFor(t.Command);
+            if (_icons.Images.ContainsKey(key))
+                item.ImageKey = key;
+            else if (IconCache.Load(key) is { } saved)
+            {
+                _icons.Images.Add(key, saved);
+                saved.Dispose();
+                item.ImageKey = key;
+            }
         }
         _list.EndUpdate();
     }
 
     /// <summary>
-    /// Reads the icon of every task's file (checked and unchecked) and shows it at the left of the item.
-    /// The slow part (disk / network access) runs on a background thread. Files that are not found get no icon.
+    /// Reads the icon of every task's file (checked and unchecked), shows it at the left of the item and
+    /// saves it in the icon cache (see <see cref="IconCache"/>). The slow part (disk / network access, saving)
+    /// runs on a background thread. Files that are not found get no new icon (a saved one stays).
     /// </summary>
     private async void FetchIcons()
     {
@@ -133,29 +145,34 @@ internal sealed class EditorForm : Form
 
         var found = await Task.Run(() =>
         {
-            var cache = new Dictionary<string, Bitmap?>(StringComparer.OrdinalIgnoreCase);
-            var result = new List<(ListViewItem Item, string Path, Bitmap Icon)>();
+            var byPath = new Dictionary<string, Bitmap?>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<(ListViewItem Item, string Key, Bitmap Icon)>();
             foreach (var (item, command) in work)
             {
                 var full = Launcher.Resolve(Launcher.Split(command).File);
                 if (full == null) continue;
-                if (!cache.TryGetValue(full, out var icon))
+                if (!byPath.TryGetValue(full, out var icon))
                 {
                     try { icon = Native.GetSmallIcon(full); }
                     catch { icon = null; }
-                    cache[full] = icon;
+                    byPath[full] = icon;
                 }
-                if (icon != null) result.Add((item, full, icon));
+                if (icon == null) continue;
+
+                var key = IconCache.KeyFor(command);
+                IconCache.Save(key, icon);
+                result.Add((item, key, icon));
             }
             return result;
         });
 
         if (IsDisposed) return;
         _list.BeginUpdate();
-        foreach (var (item, path, icon) in found)
+        foreach (var (item, key, icon) in found)
         {
-            if (!_icons.Images.ContainsKey(path)) _icons.Images.Add(path, icon);
-            item.ImageKey = path;
+            _icons.Images.RemoveByKey(key); // a new fetch replaces the old image
+            _icons.Images.Add(key, icon);
+            item.ImageKey = key;
         }
         _list.EndUpdate();
         foreach (var icon in found.Select(f => f.Icon).Distinct()) icon.Dispose();
