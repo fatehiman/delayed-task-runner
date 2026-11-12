@@ -11,12 +11,16 @@ internal enum CloseAction
 
     /// <summary>Start a command (exe, bat...), for example a script that shuts down VMs.</summary>
     Run,
+
+    /// <summary>Like Close, but an app that is still running at 20 s is killed.</summary>
+    Kill,
 }
 
 /// <summary>One row of the close list window.</summary>
 internal sealed class CloseEntry
 {
-    public CloseAction Action { get; init; }
+    /// <summary>Close or Kill can be changed in the window (right-click). Run lines stay Run.</summary>
+    public CloseAction Action { get; set; }
 
     /// <summary>
     /// Close: the exe as written (task's file part, or the conf text). Run: the command with arguments
@@ -38,6 +42,7 @@ internal sealed class CloseEntry
 ///   ; comment
 ///   close,E:\path\app.exe             WM_CLOSE to that exe (full path: only this exe)
 ///   close,chrome.exe                  WM_CLOSE to that exe name in any folder
+///   kill,E:\path\tray.exe              like close, but killed at 20 s if it is still running
 ///   run,"E:\scripts\stop vms.bat" x,2   start a command (optional ",status": 0 normal, 1 minimized, 2 hidden)
 ///   #close,E:\path\other.exe          unchecked add-on line (kept in the file, not done)
 /// A line without a known action ("E:\path\app.exe", the first format) means close.
@@ -49,6 +54,7 @@ internal static class CloseList
     {
         "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor). One \"action,details\" per line:",
         ";   close,E:\\path\\app.exe       send WM_CLOSE to that exe. Only a name (close,chrome.exe) = that exe in any folder.",
+        ";   kill,E:\\path\\app.exe        like close, but the app is killed if it is still running after 20 s.",
         ";   run,\"E:\\scripts\\my script.bat\" arg1 arg2[,status]   run a command (status: 0=normal 1=minimized 2=hidden).",
         "; \"#\" in front = unchecked (kept in the list, but not done). Lines that start with \";\" are comments.",
     };
@@ -56,6 +62,10 @@ internal static class CloseList
     /// <summary>Header lines that this app wrote before. They are replaced by the current header on save.</summary>
     private static readonly HashSet<string> OldHeaders = new(DefaultHeader)
     {
+        "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor). One \"action,details\" per line:",
+        ";   close,E:\\path\\app.exe       send WM_CLOSE to that exe. Only a name (close,chrome.exe) = that exe in any folder.",
+        ";   run,\"E:\\scripts\\my script.bat\" arg1 arg2[,status]   run a command (status: 0=normal 1=minimized 2=hidden).",
+        "; \"#\" in front = unchecked (kept in the list, but not done). Lines that start with \";\" are comments.",
         "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor).",
         "; One app per line: a full exe path (only that exe), or only an exe name like chrome.exe (that exe in any folder).",
         "; \"#\" in front = unchecked (kept in the list, but not closed). Lines that start with \";\" are comments.",
@@ -93,6 +103,7 @@ internal static class CloseList
             var rest = text[(comma + 1)..].Trim();
             if (word.Equals("close", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Close, rest.Trim('"').Trim());
             if (word.Equals("run", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Run, rest);
+            if (word.Equals("kill", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Kill, rest.Trim('"').Trim());
         }
         return (CloseAction.Close, text.Trim('"').Trim()); // first format: only the exe
     }
@@ -120,12 +131,13 @@ internal static class CloseList
             var file = Launcher.Split(command).File.Trim().Trim('"');
             var id = Identity(file);
             if (file.Length == 0 || !seen.Add(Key(CloseAction.Close, file))) continue;
+            var match = conf.FirstOrDefault(c => c.Checked && c.Action != CloseAction.Run && Identity(c.Details) == id);
             result.Add(new CloseEntry
             {
-                Action = CloseAction.Close,
+                Action = match?.Action ?? CloseAction.Close,
                 Details = file,
                 InTaskList = true,
-                Checked = conf.Any(c => c.Checked && c.Action == CloseAction.Close && Identity(c.Details) == id),
+                Checked = match != null,
                 ImageIndex = imageIndex,
             });
         }
@@ -139,7 +151,7 @@ internal static class CloseList
     }
 
     private static string Key(CloseAction action, string details) =>
-        action == CloseAction.Close ? "close|" + Identity(details) : "run|" + details.Trim().ToLowerInvariant();
+        action != CloseAction.Run ? "close|" + Identity(details) : "run|" + details.Trim().ToLowerInvariant();
 
     /// <summary>
     /// Writes the file: header, the user's own comments, checked task-list apps, then all add-on lines
@@ -158,7 +170,12 @@ internal static class CloseList
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
 
-    public static string ActionName(CloseAction action) => action == CloseAction.Run ? "run" : "close";
+    public static string ActionName(CloseAction action) => action switch
+    {
+        CloseAction.Run => "run",
+        CloseAction.Kill => "kill",
+        _ => "close",
+    };
 
     /// <summary>
     /// Compare key of an exe text: a path (has a folder) = its full path; a bare name = the name.

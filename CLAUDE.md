@@ -9,9 +9,9 @@ C# .NET 8 WinForms rewrite of an old VB6 tray app. See [README.md](README.md) fo
 - `PauseForm.cs` – pause window (manual mode): Continue / Next / Ignore this / Exit. Talks to the runner via `IPauseHost`.
   Next launches on a background STA thread (`Launcher.RunAsync`) and waits only for the launch.
 - `EditorForm.cs` – editor mode: `ListView` with checkboxes, right-click Run / Open folder, Fetch icons (shell icons via `Native.GetSmallIcon`, read on a background thread), Save/Cancel.
-- `CloseList.cs` – read/save `close-apps.conf` (`close,<exe>` / `run,<command>[,status]`; a bare path = close) and build the Close list rows (task-list files first, then add-on lines).
-- `CloseListForm.cs` – modal Close list window (checkboxes, Save/Cancel). Reads the conf file again every time.
-- `AppCloser.cs` – Close apps: `run` lines start once (`Launcher.StartAsync`, waits for the process handle); `close` lines get `WM_CLOSE` to all top-level windows of matching processes, retry at 10 s / 20 s. Stops at 30 s, never kills.
+- `CloseList.cs` – read/save `close-apps.conf` (`close,<exe>` / `kill,<exe>` / `run,<command>[,status]`; a bare path = close) and build the Close list rows (task-list files first, then add-on lines).
+- `CloseListForm.cs` – modal Close list window (checkboxes, right-click Close / Kill, Save/Cancel). Reads the conf file again every time.
+- `AppCloser.cs` – Close apps: `run` lines start once (`Launcher.StartAsync`, waits for the process handle); `close` lines get `WM_CLOSE` to all top-level windows of matching processes, retry at 10 s / 20 s with `WM_CLOSE` + `WM_QUERYENDSESSION`/`WM_ENDSESSION` (`Native.SendEndSession`); `kill` lines are killed at 20 s. Stops at 30 s. No confirm dialog.
 - `IconCache.cs` – saved icons as PNG in `%LOCALAPPDATA%\DelayedTaskRunner\icons`, key = SHA1 of the task's file text. Loaded when the editor opens, never re-checked; only Fetch icons replaces them.
 - `TaskFile.cs` – parse/save `DelayedTaskRunner.txt`. Save only changes the `#` of changed task lines; CRLF, no BOM.
 - `Launcher.cs` – splits command into file + args, resolves it (also via PATH), starts it with `ShellExecuteEx` (no-focus show modes).

@@ -167,6 +167,36 @@ internal static class Native
         return result;
     }
 
+    private const uint WM_QUERYENDSESSION = 0x0011;
+    private const uint WM_ENDSESSION = 0x0016;
+    private const uint ENDSESSION_CLOSEAPP = 0x1;
+    private const uint SMTO_ABORTIFHUNG = 0x2;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+
+    /// <summary>
+    /// The messages Windows (Restart Manager) sends to close an app for an update / shutdown:
+    /// WM_QUERYENDSESSION, then WM_ENDSESSION(TRUE) with ENDSESSION_CLOSEAPP. Waits up to 2 s for each window.
+    /// Returns null on success, or the Windows error text.
+    /// </summary>
+    public static string? SendEndSession(IntPtr hWnd)
+    {
+        var lParam = (IntPtr)ENDSESSION_CLOSEAPP;
+        if (SendMessageTimeoutW(hWnd, WM_QUERYENDSESSION, IntPtr.Zero, lParam, SMTO_ABORTIFHUNG, 2000, out _) == IntPtr.Zero)
+        {
+            int err = Marshal.GetLastWin32Error();
+            if (err != 0) return new Win32Exception(err).Message;
+        }
+        // Like Restart Manager: WM_ENDSESSION(TRUE) also when the app said "no" (we close it anyway).
+        if (SendMessageTimeoutW(hWnd, WM_ENDSESSION, (IntPtr)1, lParam, SMTO_ABORTIFHUNG, 2000, out _) == IntPtr.Zero)
+        {
+            int err = Marshal.GetLastWin32Error();
+            if (err != 0) return new Win32Exception(err).Message;
+        }
+        return null;
+    }
+
     /// <summary>Posts WM_CLOSE (does not wait). Returns null on success, or the Windows error text.</summary>
     public static string? PostClose(IntPtr hWnd) =>
         PostMessageW(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero) ? null : new Win32Exception(Marshal.GetLastWin32Error()).Message;

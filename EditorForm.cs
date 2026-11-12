@@ -251,10 +251,6 @@ internal sealed class EditorForm : Form
                 Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        int closes = apps.Count(a => a.Action == CloseAction.Close), runs = apps.Count - closes;
-        if (MessageBox.Show(this, $"Close {closes} app(s) and run {runs} command(s) of the close list, then exit?",
-                Program.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-            return;
 
         _closingApps = true;
         _list.Enabled = false;

@@ -55,22 +55,28 @@ DelayedTaskRunner.exe /edit
   To clear all saved icons, delete that folder.
 - **Save**: write the file and close. **Cancel** (or the X button): close without saving.
 - Save changes only the `#` in front of the changed lines. All other lines (comments, order, spacing) stay the same.
-- **Close list** (bottom left): opens a window with the close / run lines (see [The close list](#the-close-list)).
+- **Close list** (bottom left): opens a window with the close / kill / run lines (see [The close list](#the-close-list)).
   Check or uncheck lines, then **Save** (writes `close-apps.conf`) or **Cancel**.
-- **Close apps** (bottom left): after a Yes/No question, does the checked lines of `close-apps.conf`, then the editor exits.
+  Right-click a close / kill row to change its action: **Close** or **Kill if not closed after 20 s**.
+- **Close apps** (bottom left): does the checked lines of `close-apps.conf` (no question), then the editor exits.
   - The whole window is locked while it runs (also the X button). Changes in the task list are **not** saved.
   - All lines start at once:
     - `run` lines: the command is started **one time** (no retry). The editor waits for it to end.
-    - `close` lines: it sends `WM_CLOSE` to all top-level windows (also hidden ones) of each running app
-      (the same as `taskkill` without `/F`). The app can still ask "Save changes?".
-      Apps that are still running get `WM_CLOSE` again after 10 s and after 20 s.
+    - `close` lines:
+      - 0 s: `WM_CLOSE` to all top-level windows (also hidden ones) of each running app
+        (the same as `taskkill` without `/F`). The app can still ask "Save changes?".
+      - 10 s and 20 s: apps that are still running get `WM_CLOSE` again, plus the Windows shutdown messages
+        (`WM_QUERYENDSESSION` + `WM_ENDSESSION`, like Windows sends at shutdown / update).
+        Some apps that ignore `WM_CLOSE` (for example many WinForms tray apps) exit on these.
+    - `kill` lines: the same as `close`, but an app that is still running at **20 s** is killed (all its processes).
+      Use it only for apps that do not close in another way (some tray apps exit only from their own menu).
   - The editor exits when all apps are closed and all commands ended, or after **30 s** at most.
-    It never kills anything: a command that is still busy (for example a VM shutdown script) keeps running.
+    Only `kill` apps are killed. A command that is still busy (for example a VM shutdown script) keeps running.
   - Every step goes to the log. Problems are logged as `WARNING:` / `ERROR:`: an app still running after 30 s
     (`NOT closed`), a command still running after 30 s, a command with a non-zero exit code, a file not found.
   - Known limits: an app with no window (console / service apps) can not get `WM_CLOSE` (logged as a warning;
-    use a `run` line for it, for example `taskkill`). An app that runs as administrator can not get it from a normal app
-    (logged as an error).
+    use a `kill` line for it). An app that runs as administrator can not get messages from a normal app,
+    and can not be killed by it (logged as an error).
 
 Only one copy of the app can run (in both modes). A second copy shows "DelayedTaskRunner is already running." and exits.
 
@@ -106,6 +112,7 @@ One `action,details` per line:
 close,E:\appServices\stretchly\stretchly.exe
 close,C:\Program Files\Some App\app.exe
 close,chrome.exe
+kill,E:\www\some-tray-app\tray.exe
 run,"E:\scripts\stop vms.bat" soft,2
 #close,E:\tools\other.exe
 ```
@@ -113,17 +120,18 @@ run,"E:\scripts\stop vms.bat" soft,2
 - `close,<exe>`: send `WM_CLOSE` to that app. No quotes, no arguments.
   - A full path: only that exe is closed.
   - Only a name (like `chrome.exe`): that exe is closed in any folder.
+- `kill,<exe>`: the same as `close`, but the app is killed if it is still running after 20 s.
 - `run,<command>[,status]`: run a command (exe, bat, cmd...), the same way as a task:
   path in double quotes if it has spaces, then the arguments. `status` (optional): `0` normal, `1` minimized, `2` hidden.
   Use it for things that `WM_CLOSE` can not do, for example a script that shuts down the VMs.
 - A line with no known action (only a path, the first format of this file) means `close`.
 - `#` in front = unchecked (kept in the list, but not done). `;` = comment.
-- The Close list window shows first every file of the task list as a `close` line (each file once, checked and
+- The Close list window shows first every file of the task list as a `close` (or `kill`) line (each file once, checked and
   unchecked tasks), then the **add-on lines**: lines of `close-apps.conf` that are not in the task list
-  (all `run` lines, and `close` lines you add by hand).
+  (all `run` lines, and `close` / `kill` lines you add by hand).
 - Save writes: the header, your own `;` comments, the checked task-list apps, then all add-on lines.
   An unchecked task-list app is **removed** from the file. An unchecked add-on line **stays**, with `#` in front.
-- `close` lines for `.bat` / `.cmd` / other non-exe files are shown in gray: they are not running apps, so there is
+- `close` / `kill` lines for `.bat` / `.cmd` / other non-exe files are shown in gray: they are not running apps, so there is
   nothing to close. To close what a batch file started, add that exe by hand, or add a `run` line.
 
 ## Log
