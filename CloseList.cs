@@ -1,14 +1,30 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DelayedTaskRunner;
+
+/// <summary>What a close-apps.conf line does.</summary>
+internal enum CloseAction
+{
+    /// <summary>Send WM_CLOSE to a running exe.</summary>
+    Close,
+
+    /// <summary>Start a command (exe, bat...), for example a script that shuts down VMs.</summary>
+    Run,
+}
 
 /// <summary>One row of the close list window.</summary>
 internal sealed class CloseEntry
 {
-    /// <summary>The app's file as written (task's file part, or the close-apps.conf line without "#").</summary>
-    public string File { get; init; } = "";
+    public CloseAction Action { get; init; }
 
-    /// <summary>True = the app is in the task list. False = an add-on app (only in close-apps.conf).</summary>
+    /// <summary>
+    /// Close: the exe as written (task's file part, or the conf text). Run: the command with arguments
+    /// (and the optional ",status" at the end), as written in the conf file.
+    /// </summary>
+    public string Details { get; init; } = "";
+
+    /// <summary>True = the app is in the task list. False = an add-on line (only in close-apps.conf).</summary>
     public bool InTaskList { get; init; }
 
     public bool Checked { get; set; }
@@ -18,46 +34,81 @@ internal sealed class CloseEntry
 }
 
 /// <summary>
-/// close-apps.conf (next to the exe): the apps that "Close apps" closes.
+/// close-apps.conf (next to the exe): what "Close apps" does. One "action,details" line each:
 ///   ; comment
-///   E:\path\app.exe      checked (full path: only this exe)
-///   chrome.exe           checked (only a name: this exe in any folder)
-///   #E:\path\other.exe   unchecked add-on app (kept in the file, not closed)
-/// Apps of the task list are in the file only when checked. Add-on apps stay in the file also when unchecked.
+///   close,E:\path\app.exe             WM_CLOSE to that exe (full path: only this exe)
+///   close,chrome.exe                  WM_CLOSE to that exe name in any folder
+///   run,"E:\scripts\stop vms.bat" x,2   start a command (optional ",status": 0 normal, 1 minimized, 2 hidden)
+///   #close,E:\path\other.exe          unchecked add-on line (kept in the file, not done)
+/// A line without a known action ("E:\path\app.exe", the first format) means close.
+/// Task-list apps are in the file only when checked. Add-on lines stay in the file also when unchecked.
 /// </summary>
 internal static class CloseList
 {
     private static readonly string[] DefaultHeader =
+    {
+        "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor). One \"action,details\" per line:",
+        ";   close,E:\\path\\app.exe       send WM_CLOSE to that exe. Only a name (close,chrome.exe) = that exe in any folder.",
+        ";   run,\"E:\\scripts\\my script.bat\" arg1 arg2[,status]   run a command (status: 0=normal 1=minimized 2=hidden).",
+        "; \"#\" in front = unchecked (kept in the list, but not done). Lines that start with \";\" are comments.",
+    };
+
+    /// <summary>Header lines that this app wrote before. They are replaced by the current header on save.</summary>
+    private static readonly HashSet<string> OldHeaders = new(DefaultHeader)
     {
         "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor).",
         "; One app per line: a full exe path (only that exe), or only an exe name like chrome.exe (that exe in any folder).",
         "; \"#\" in front = unchecked (kept in the list, but not closed). Lines that start with \";\" are comments.",
     };
 
-    public sealed record ConfLine(string File, bool Checked);
+    private static readonly Regex StatusTail = new(@"^(.*\S)\s*,\s*([0-2])\s*$", RegexOptions.Compiled);
+
+    public sealed record ConfLine(CloseAction Action, string Details, bool Checked);
 
     /// <summary>Reads the file (always from disk, no cache). A missing file = empty list.</summary>
-    public static (List<string> Comments, List<ConfLine> Apps) Read(string path)
+    public static (List<string> Comments, List<ConfLine> Lines) Read(string path)
     {
         var comments = new List<string>();
-        var apps = new List<ConfLine>();
-        if (!System.IO.File.Exists(path)) return (comments, apps);
+        var lines = new List<ConfLine>();
+        if (!File.Exists(path)) return (comments, lines);
 
-        foreach (var raw in System.IO.File.ReadAllLines(path, Encoding.UTF8))
+        foreach (var raw in File.ReadAllLines(path, Encoding.UTF8))
         {
             var t = raw.Trim();
             if (t.Length == 0) continue;
             if (t.StartsWith(';')) { comments.Add(raw.TrimEnd()); continue; }
             bool on = !t.StartsWith('#');
-            var file = t.TrimStart('#').Trim().Trim('"').Trim();
-            if (file.Length > 0) apps.Add(new ConfLine(file, on));
+            var (action, details) = ParseLine(t.TrimStart('#').Trim());
+            if (details.Length > 0) lines.Add(new ConfLine(action, details, on));
         }
-        return (comments, apps);
+        return (comments, lines);
+    }
+
+    private static (CloseAction, string) ParseLine(string text)
+    {
+        int comma = text.IndexOf(',');
+        if (comma > 0)
+        {
+            var word = text[..comma].Trim();
+            var rest = text[(comma + 1)..].Trim();
+            if (word.Equals("close", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Close, rest.Trim('"').Trim());
+            if (word.Equals("run", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Run, rest);
+        }
+        return (CloseAction.Close, text.Trim('"').Trim()); // first format: only the exe
+    }
+
+    /// <summary>Splits run details into the command and the optional ",status" at the end.</summary>
+    public static (string Command, RunStatus Status) SplitRun(string details)
+    {
+        var m = StatusTail.Match(details.Trim());
+        return m.Success
+            ? (m.Groups[1].Value.Trim(), (RunStatus)int.Parse(m.Groups[2].Value))
+            : (details.Trim(), RunStatus.Normal);
     }
 
     /// <summary>
-    /// Rows for the close list window: first the apps of the task list (each file once, in task order),
-    /// then the add-on apps of close-apps.conf (in file order).
+    /// Rows for the close list window: first the apps of the task list (each file once, in task order, action close),
+    /// then the add-on lines of close-apps.conf (in file order).
     /// </summary>
     public static List<CloseEntry> Build(IEnumerable<(string Command, int ImageIndex)> tasks, List<ConfLine> conf)
     {
@@ -68,39 +119,49 @@ internal static class CloseList
         {
             var file = Launcher.Split(command).File.Trim().Trim('"');
             var id = Identity(file);
-            if (file.Length == 0 || !seen.Add(id)) continue;
+            if (file.Length == 0 || !seen.Add(Key(CloseAction.Close, file))) continue;
             result.Add(new CloseEntry
             {
-                File = file,
+                Action = CloseAction.Close,
+                Details = file,
                 InTaskList = true,
-                Checked = conf.Any(c => c.Checked && Identity(c.File) == id),
+                Checked = conf.Any(c => c.Checked && c.Action == CloseAction.Close && Identity(c.Details) == id),
                 ImageIndex = imageIndex,
             });
         }
 
         foreach (var c in conf)
         {
-            if (!seen.Add(Identity(c.File))) continue; // in the task list, or a duplicate line
-            result.Add(new CloseEntry { File = c.File, InTaskList = false, Checked = c.Checked });
+            if (!seen.Add(Key(c.Action, c.Details))) continue; // in the task list, or a duplicate line
+            result.Add(new CloseEntry { Action = c.Action, Details = c.Details, InTaskList = false, Checked = c.Checked });
         }
         return result;
     }
 
-    /// <summary>Writes the file: comments, checked task-list apps, then all add-on apps ("#" = unchecked). CRLF, no BOM.</summary>
+    private static string Key(CloseAction action, string details) =>
+        action == CloseAction.Close ? "close|" + Identity(details) : "run|" + details.Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// Writes the file: header, the user's own comments, checked task-list apps, then all add-on lines
+    /// ("#" = unchecked). CRLF, no BOM.
+    /// </summary>
     public static void Save(string path, List<string> comments, IEnumerable<CloseEntry> entries)
     {
         var sb = new StringBuilder();
-        foreach (var l in comments.Count > 0 ? comments : DefaultHeader.ToList()) sb.Append(l).Append("\r\n");
+        foreach (var l in DefaultHeader) sb.Append(l).Append("\r\n");
+        foreach (var l in comments.Where(c => !OldHeaders.Contains(c.Trim()))) sb.Append(l).Append("\r\n");
         foreach (var e in entries)
         {
             if (e.InTaskList && !e.Checked) continue; // unchecked task-list apps are not kept
-            sb.Append(e.Checked ? "" : "#").Append(e.File).Append("\r\n");
+            sb.Append(e.Checked ? "" : "#").Append(ActionName(e.Action)).Append(',').Append(e.Details).Append("\r\n");
         }
-        System.IO.File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
+        File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
 
+    public static string ActionName(CloseAction action) => action == CloseAction.Run ? "run" : "close";
+
     /// <summary>
-    /// Compare key of a file text: a path (has a folder) = its full path; a bare name = the name.
+    /// Compare key of an exe text: a path (has a folder) = its full path; a bare name = the name.
     /// Lower case, environment variables expanded. No disk access.
     /// </summary>
     public static string Identity(string file)

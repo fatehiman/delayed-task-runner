@@ -67,21 +67,46 @@ internal static class Launcher
     }
 
     /// <summary>Starts the task. Returns null on success, or an error text.</summary>
-    public static string? Run(TaskItem task)
+    public static string? Run(TaskItem task) => Start(task.Command, task.Status, false, out _);
+
+    /// <summary>
+    /// Same as <see cref="Start"/>, on a background STA thread. Process = the started process handle
+    /// (zero when there is none); close it with <see cref="Native.CloseProcessHandle"/>.
+    /// </summary>
+    public static Task<(string? Error, IntPtr Process)> StartAsync(string command, RunStatus status)
     {
-        var (file, args) = Split(task.Command);
+        var tcs = new TaskCompletionSource<(string?, IntPtr)>();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var err = Start(command, status, true, out var process);
+                tcs.SetResult((err, process));
+            }
+            catch (Exception ex) { tcs.SetResult((ex.Message, IntPtr.Zero)); }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return tcs.Task;
+    }
+
+    /// <summary>Starts a command. Returns null on success, or an error text.</summary>
+    public static string? Start(string command, RunStatus status, bool wantProcess, out IntPtr process)
+    {
+        process = IntPtr.Zero;
+        var (file, args) = Split(command);
         var full = Resolve(file);
         if (full == null) return $"File not found: {file}";
 
         // Same "no focus" style as the old VB6 app (vbNormalNoFocus / vbMinimizedNoFocus).
-        int show = task.Status switch
+        int show = status switch
         {
             RunStatus.Minimized => Native.SW_SHOWMINNOACTIVE,
             RunStatus.Hidden => Native.SW_HIDE,
             _ => Native.SW_SHOWNOACTIVATE,
         };
 
-        var err = Native.ShellExecute(full, args, Path.GetDirectoryName(full), show);
+        var err = Native.ShellExecute(full, args, Path.GetDirectoryName(full), show, wantProcess, out process);
         return err == null ? null : $"Can not start {file}: {err}";
     }
 }

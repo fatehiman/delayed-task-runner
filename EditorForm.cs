@@ -227,15 +227,15 @@ internal sealed class EditorForm : Form
     }
 
     /// <summary>
-    /// Locks the window, closes the checked apps of close-apps.conf (see <see cref="AppCloser"/>),
-    /// then closes this app: when all apps are closed, or after 30 s at most. Task list changes are not saved.
+    /// Locks the window, does the checked lines of close-apps.conf (close apps, run commands; see <see cref="AppCloser"/>),
+    /// then closes this app: when all are done, or after 30 s at most. Task list changes are not saved.
     /// </summary>
     private async void CloseApps()
     {
-        List<string> apps;
+        List<CloseList.ConfLine> apps;
         try
         {
-            apps = CloseList.Read(Paths.CloseAppsFile).Apps.Where(a => a.Checked).Select(a => a.File).ToList();
+            apps = CloseList.Read(Paths.CloseAppsFile).Lines.Where(a => a.Checked).ToList();
         }
         catch (Exception ex)
         {
@@ -251,7 +251,8 @@ internal sealed class EditorForm : Form
                 Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        if (MessageBox.Show(this, $"Close {apps.Count} app(s) of the close list, then exit?",
+        int closes = apps.Count(a => a.Action == CloseAction.Close), runs = apps.Count - closes;
+        if (MessageBox.Show(this, $"Close {closes} app(s) and run {runs} command(s) of the close list, then exit?",
                 Program.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
 

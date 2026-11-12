@@ -1,7 +1,8 @@
 namespace DelayedTaskRunner;
 
 /// <summary>
-/// Modal "Close list" window: all apps of the task list, then the add-on apps of close-apps.conf, with a checkbox.
+/// Modal "Close list" window: all apps of the task list (action close), then the add-on lines of close-apps.conf
+/// (close or run), with a checkbox.
 /// close-apps.conf is read again every time this window opens. Save writes it and closes; Cancel just closes.
 /// </summary>
 internal sealed class CloseListForm : Form
@@ -32,10 +33,11 @@ internal sealed class CloseListForm : Form
             ShowItemToolTips = true,
             SmallImageList = icons,
         };
-        _list.Columns.Add("App", 520);
+        _list.Columns.Add("Action", 70);
+        _list.Columns.Add("App / command", 450);
         _list.Columns.Add("From", 130);
         _list.ClientSizeChanged += (_, _) =>
-            _list.Columns[0].Width = Math.Max(150, _list.ClientSize.Width - _list.Columns[1].Width);
+            _list.Columns[1].Width = Math.Max(150, _list.ClientSize.Width - _list.Columns[0].Width - _list.Columns[2].Width);
 
         var save = new Button { Text = "Save", AutoSize = true, MinimumSize = new Size(90, 30) };
         var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(90, 30), DialogResult = DialogResult.Cancel };
@@ -78,9 +80,10 @@ internal sealed class CloseListForm : Form
         _list.BeginUpdate();
         foreach (var e in _entries)
         {
-            var item = new ListViewItem(e.File) { Checked = e.Checked, Tag = e, ImageIndex = e.ImageIndex };
+            var item = new ListViewItem(CloseList.ActionName(e.Action)) { Checked = e.Checked, Tag = e, ImageIndex = e.ImageIndex };
+            item.SubItems.Add(e.Details);
             item.SubItems.Add(e.InTaskList ? "Task list" : "close-apps.conf");
-            if (!CloseList.IsApp(e.File))
+            if (e.Action == CloseAction.Close && !CloseList.IsApp(e.Details))
             {
                 item.ForeColor = SystemColors.GrayText;
                 item.ToolTipText = "Not an exe: there is no app to close for this file.";

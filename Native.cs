@@ -13,6 +13,7 @@ internal static class Native
     private const uint MB_TOPMOST = 0x40000;
     private const uint SEE_MASK_NOASYNC = 0x100;
     private const uint SEE_MASK_FLAG_NO_UI = 0x400;
+    private const uint SEE_MASK_NOCLOSEPROCESS = 0x40;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
@@ -44,18 +45,28 @@ internal static class Native
     private static extern bool ShellExecuteExW(ref SHELLEXECUTEINFO info);
 
     /// <summary>Returns null on success, or the Windows error text.</summary>
-    public static string? ShellExecute(string file, string args, string? dir, int show)
+    public static string? ShellExecute(string file, string args, string? dir, int show) =>
+        ShellExecute(file, args, dir, show, false, out _);
+
+    /// <summary>
+    /// Returns null on success, or the Windows error text. With <paramref name="wantProcess"/>, <paramref name="process"/>
+    /// is the started process handle (close it with <see cref="CloseProcessHandle"/>), or zero when Windows gives none.
+    /// </summary>
+    public static string? ShellExecute(string file, string args, string? dir, int show, bool wantProcess, out IntPtr process)
     {
         var info = new SHELLEXECUTEINFO
         {
             cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),
-            fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+            fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | (wantProcess ? SEE_MASK_NOCLOSEPROCESS : 0),
             lpFile = file,
             lpParameters = string.IsNullOrEmpty(args) ? null : args,
             lpDirectory = dir,
             nShow = show,
         };
-        return ShellExecuteExW(ref info) ? null : new Win32Exception(Marshal.GetLastWin32Error()).Message;
+        bool ok = ShellExecuteExW(ref info);
+        var error = ok ? null : new Win32Exception(Marshal.GetLastWin32Error()).Message;
+        process = ok ? info.hProcess : IntPtr.Zero;
+        return error;
     }
 
     private const uint SHGFI_ICON = 0x100;
@@ -117,6 +128,26 @@ internal static class Native
 
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+
+    /// <summary>True when the process of the handle has ended (does not wait). <paramref name="exitCode"/> is set then.</summary>
+    public static bool HasProcessEnded(IntPtr process, out uint exitCode)
+    {
+        exitCode = 0;
+        if (WaitForSingleObject(process, 0) != 0) return false; // 0 = WAIT_OBJECT_0
+        GetExitCodeProcess(process, out exitCode);
+        return true;
+    }
+
+    public static void CloseProcessHandle(IntPtr process)
+    {
+        if (process != IntPtr.Zero) CloseHandle(process);
+    }
 
     /// <summary>All top-level windows of a process (also hidden ones, like tray apps have), without IME windows.</summary>
     public static List<IntPtr> GetTopLevelWindows(int processId)

@@ -3,9 +3,12 @@ using System.Diagnostics;
 namespace DelayedTaskRunner;
 
 /// <summary>
-/// Closes the apps of the close list: sends WM_CLOSE to all top-level windows of each running process
-/// (like "taskkill" without /F), at once. Sends it again after 10 s and 20 s to the processes that are still running.
-/// Stops waiting after 30 s. It never kills a process. Every result is written to the log.
+/// Does the checked lines of the close list, all at once:
+/// - run: starts the command one time (no retry) and waits for it to end.
+/// - close: sends WM_CLOSE to all top-level windows of each running process (like "taskkill" without /F).
+///   Sends it again after 10 s and 20 s to the processes that are still running.
+/// Stops waiting after 30 s. It never kills a process (a run command that is still busy keeps running).
+/// Every result is written to the log.
 /// </summary>
 internal static class AppCloser
 {
@@ -23,16 +26,38 @@ internal static class AppCloser
         public override string ToString() => $"{Name} (PID {Process.Id}, from '{Entry}')";
     }
 
+    /// <summary>A started run command.</summary>
+    private sealed class Started
+    {
+        public required string Command { get; init; }
+        public IntPtr Handle { get; set; }
+        public bool Done => Handle == IntPtr.Zero;
+    }
+
     /// <summary>
-    /// Runs on the UI thread (the slow process scan runs on a background thread).
-    /// <paramref name="status"/> gets a short text for the window. Returns the number of apps still running.
+    /// Runs on the UI thread (starting commands and the slow process scan run on background threads).
+    /// <paramref name="status"/> gets a short text for the window. Returns the number of apps / commands still running.
     /// </summary>
-    public static async Task<int> CloseAllAsync(IReadOnlyList<string> entries, Action<string> status)
+    public static async Task<int> CloseAllAsync(IReadOnlyList<CloseList.ConfLine> lines, Action<string> status)
     {
         var clock = Stopwatch.StartNew();
         var tracked = new Dictionary<int, Tracked>();
         var maxTime = RoundTime * Rounds;
-        Logger.Write($"Close apps: {entries.Count} app(s) in the close list.");
+        var entries = lines.Where(l => l.Action == CloseAction.Close).Select(l => l.Details).ToList();
+        var commands = lines.Where(l => l.Action == CloseAction.Run).Select(l => l.Details).ToList();
+        Logger.Write($"Close apps: {entries.Count} app(s) to close, {commands.Count} command(s) to run.");
+
+        // Run commands: start them all (in parallel, each on its own STA thread), one time only.
+        var starts = commands.Select(async details =>
+        {
+            var (command, runStatus) = CloseList.SplitRun(details);
+            var (error, handle) = await Launcher.StartAsync(command, runStatus);
+            if (error != null) Logger.Error($"Close apps: run '{details}': {error}");
+            else Logger.Write($"Close apps: started '{details}'" + (handle == IntPtr.Zero ? " (can not wait for it)." : "."));
+            return new Started { Command = details, Handle = handle };
+        }).ToList();
+        var started = (await Task.WhenAll(starts)).ToList();
+        int RunsLeft() => started.Count(r => !IsDone(r, clock));
 
         for (int round = 0; round < Rounds; round++)
         {
@@ -55,28 +80,47 @@ internal static class AppCloser
             }
 
             var alive = tracked.Values.Where(t => !IsGone(t, clock)).ToList();
-            if (alive.Count == 0) break;
+            if (alive.Count == 0 && RunsLeft() == 0) break;
 
             foreach (var t in alive) SendClose(t, round);
 
             var until = RoundTime * (round + 1);
             while (clock.Elapsed < until)
             {
-                int left = tracked.Values.Count(t => !IsGone(t, clock));
-                if (left == 0) break;
-                status($"Closing apps: {left} left, {Math.Max(0, (int)(maxTime - clock.Elapsed).TotalSeconds)} s...");
+                int apps = tracked.Values.Count(t => !IsGone(t, clock)), runs = RunsLeft();
+                if (apps + runs == 0) break;
+                status($"Closing: {apps} app(s), {runs} command(s) left, {Math.Max(0, (int)(maxTime - clock.Elapsed).TotalSeconds)} s...");
                 await Task.Delay(250);
             }
-            if (tracked.Values.All(t => IsGone(t, clock))) break;
+            if (tracked.Values.All(t => IsGone(t, clock)) && RunsLeft() == 0) break;
         }
+
+        foreach (var r in started.Where(r => !r.Done))
+        {
+            Logger.Warn($"Close apps: command still running after {clock.Elapsed.TotalSeconds:0} s (left running): '{r.Command}'");
+            Native.CloseProcessHandle(r.Handle);
+        }
+        int runsNotDone = started.Count(r => !r.Done);
 
         var notClosed = tracked.Values.Where(t => !IsGone(t, clock)).ToList();
         foreach (var t in notClosed)
             Logger.Warn($"Close apps: NOT closed after {clock.Elapsed.TotalSeconds:0} s: {t} {Native.GetProcessPath(t.Process.Id)}");
-        Logger.Write($"Close apps: done in {clock.Elapsed.TotalSeconds:0.0} s. Closed: {tracked.Count - notClosed.Count}, not closed: {notClosed.Count}.");
+        Logger.Write($"Close apps: done in {clock.Elapsed.TotalSeconds:0.0} s. Closed: {tracked.Count - notClosed.Count}, not closed: {notClosed.Count}, commands still running: {runsNotDone}.");
 
         foreach (var t in tracked.Values) t.Process.Dispose();
-        return notClosed.Count;
+        return notClosed.Count + runsNotDone;
+    }
+
+    /// <summary>True when the run command has ended (logs its exit code one time).</summary>
+    private static bool IsDone(Started r, Stopwatch clock)
+    {
+        if (r.Done) return true;
+        if (!Native.HasProcessEnded(r.Handle, out uint code)) return false;
+        Native.CloseProcessHandle(r.Handle);
+        r.Handle = IntPtr.Zero;
+        if (code == 0) Logger.Write($"Close apps: command ended after {clock.Elapsed.TotalSeconds:0.0} s: '{r.Command}'");
+        else Logger.Warn($"Close apps: command ended with exit code {code} after {clock.Elapsed.TotalSeconds:0.0} s: '{r.Command}'");
+        return true;
     }
 
     /// <summary>Running processes of the entries (path entry = that exe only; name entry = that exe name in any folder).</summary>
