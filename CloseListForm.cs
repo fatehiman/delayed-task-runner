@@ -39,34 +39,6 @@ internal sealed class CloseListForm : Form
         _list.ClientSizeChanged += (_, _) =>
             _list.Columns[1].Width = Math.Max(150, _list.ClientSize.Width - _list.Columns[0].Width - _list.Columns[2].Width);
 
-        // Right-click: change the action of a close / kill row.
-        var closeItem = new ToolStripMenuItem("Close (WM_CLOSE + shutdown messages)");
-        var killItem = new ToolStripMenuItem("Kill if not closed after 20 s");
-        closeItem.Click += (_, _) => SetAction(CloseAction.Close);
-        killItem.Click += (_, _) => SetAction(CloseAction.Kill);
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(closeItem);
-        menu.Items.Add(killItem);
-        menu.Opening += (_, e) =>
-        {
-            var entry = Selected();
-            e.Cancel = entry == null || entry.Action == CloseAction.Run;
-            if (entry == null) return;
-            closeItem.Checked = entry.Action == CloseAction.Close;
-            killItem.Checked = entry.Action == CloseAction.Kill;
-        };
-        _list.ContextMenuStrip = menu;
-        _list.MouseDown += (_, e) =>
-        {
-            // Right-click selects the item under the mouse first.
-            if (e.Button == MouseButtons.Right && _list.GetItemAt(e.X, e.Y) is { } hit)
-            {
-                _list.SelectedItems.Clear();
-                hit.Selected = true;
-                hit.Focused = true;
-            }
-        };
-
         var save = new Button { Text = "Save", AutoSize = true, MinimumSize = new Size(90, 30) };
         var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(90, 30), DialogResult = DialogResult.Cancel };
         save.Click += (_, _) => SaveAndClose();
@@ -119,18 +91,6 @@ internal sealed class CloseListForm : Form
             _list.Items.Add(item);
         }
         _list.EndUpdate();
-    }
-
-    private CloseEntry? Selected() =>
-        _list.SelectedItems.Count == 0 ? null : _list.SelectedItems[0].Tag as CloseEntry;
-
-    private void SetAction(CloseAction action)
-    {
-        if (Selected() is not { } entry || entry.Action == CloseAction.Run) return;
-        entry.Action = action;
-        var item = _list.SelectedItems[0];
-        item.Text = CloseList.ActionName(action);
-        if (action == CloseAction.Kill) item.Checked = true; // choosing kill means: do this app
     }
 
     private void SaveAndClose()

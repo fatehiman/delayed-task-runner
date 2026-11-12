@@ -11,16 +11,12 @@ internal enum CloseAction
 
     /// <summary>Start a command (exe, bat...), for example a script that shuts down VMs.</summary>
     Run,
-
-    /// <summary>Like Close, but an app that is still running at 20 s is killed.</summary>
-    Kill,
 }
 
 /// <summary>One row of the close list window.</summary>
 internal sealed class CloseEntry
 {
-    /// <summary>Close or Kill can be changed in the window (right-click). Run lines stay Run.</summary>
-    public CloseAction Action { get; set; }
+    public CloseAction Action { get; init; }
 
     /// <summary>
     /// Close: the exe as written (task's file part, or the conf text). Run: the command with arguments
@@ -42,7 +38,6 @@ internal sealed class CloseEntry
 ///   ; comment
 ///   close,E:\path\app.exe             WM_CLOSE to that exe (full path: only this exe)
 ///   close,chrome.exe                  WM_CLOSE to that exe name in any folder
-///   kill,E:\path\tray.exe              like close, but killed at 20 s if it is still running
 ///   run,"E:\scripts\stop vms.bat" x,2   start a command (optional ",status": 0 normal, 1 minimized, 2 hidden)
 ///   #close,E:\path\other.exe          unchecked add-on line (kept in the file, not done)
 /// A line without a known action ("E:\path\app.exe", the first format) means close.
@@ -53,8 +48,7 @@ internal static class CloseList
     private static readonly string[] DefaultHeader =
     {
         "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor). One \"action,details\" per line:",
-        ";   close,E:\\path\\app.exe       send WM_CLOSE to that exe. Only a name (close,chrome.exe) = that exe in any folder.",
-        ";   kill,E:\\path\\app.exe        like close, but the app is killed if it is still running after 20 s.",
+        ";   close,E:\\path\\app.exe       close that exe (killed at 20 s if still running). Only a name (close,chrome.exe) = that exe in any folder.",
         ";   run,\"E:\\scripts\\my script.bat\" arg1 arg2[,status]   run a command (status: 0=normal 1=minimized 2=hidden).",
         "; \"#\" in front = unchecked (kept in the list, but not done). Lines that start with \";\" are comments.",
     };
@@ -62,6 +56,7 @@ internal static class CloseList
     /// <summary>Header lines that this app wrote before. They are replaced by the current header on save.</summary>
     private static readonly HashSet<string> OldHeaders = new(DefaultHeader)
     {
+        ";   kill,E:\\path\\app.exe        like close, but the app is killed if it is still running after 20 s.",
         "; DelayedTaskRunner close list (used by the \"Close apps\" button of the editor). One \"action,details\" per line:",
         ";   close,E:\\path\\app.exe       send WM_CLOSE to that exe. Only a name (close,chrome.exe) = that exe in any folder.",
         ";   run,\"E:\\scripts\\my script.bat\" arg1 arg2[,status]   run a command (status: 0=normal 1=minimized 2=hidden).",
@@ -103,7 +98,7 @@ internal static class CloseList
             var rest = text[(comma + 1)..].Trim();
             if (word.Equals("close", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Close, rest.Trim('"').Trim());
             if (word.Equals("run", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Run, rest);
-            if (word.Equals("kill", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Kill, rest.Trim('"').Trim());
+            if (word.Equals("kill", StringComparison.OrdinalIgnoreCase)) return (CloseAction.Close, rest.Trim('"').Trim()); // old action, now = close
         }
         return (CloseAction.Close, text.Trim('"').Trim()); // first format: only the exe
     }
@@ -170,12 +165,7 @@ internal static class CloseList
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
 
-    public static string ActionName(CloseAction action) => action switch
-    {
-        CloseAction.Run => "run",
-        CloseAction.Kill => "kill",
-        _ => "close",
-    };
+    public static string ActionName(CloseAction action) => action == CloseAction.Run ? "run" : "close";
 
     /// <summary>
     /// Compare key of an exe text: a path (has a folder) = its full path; a bare name = the name.

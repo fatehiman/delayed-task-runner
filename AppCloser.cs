@@ -6,9 +6,9 @@ namespace DelayedTaskRunner;
 /// Does the checked lines of the close list, all at once:
 /// - run: starts the command one time (no retry) and waits for it to end.
 /// - close: 0 s: WM_CLOSE to all top-level windows of each running process (like "taskkill" without /F).
-///   10 s and 20 s: WM_CLOSE again plus the Windows shutdown messages (WM_QUERYENDSESSION / WM_ENDSESSION).
-/// - kill: the same as close, but at 20 s a process that is still running is killed.
-/// Stops waiting after 30 s. Only kill lines are killed (a run command that is still busy keeps running).
+///   10 s: WM_CLOSE again plus the Windows shutdown messages (WM_QUERYENDSESSION / WM_ENDSESSION).
+///   20 s (last try): every process that is still running is killed.
+/// Stops waiting after 30 s. A run command that is still busy is not killed (it keeps running).
 /// Every result is written to the log.
 /// </summary>
 internal static class AppCloser
@@ -21,7 +21,6 @@ internal static class AppCloser
         public required Process Process { get; init; }
         public required string Entry { get; init; }
         public required string Name { get; init; }
-        public bool Kill { get; init; }
         public bool Gone { get; set; }
         public bool NoWindowLogged { get; set; }
         public bool DeniedLogged { get; set; }
@@ -47,7 +46,7 @@ internal static class AppCloser
         var maxTime = RoundTime * Rounds;
         var entries = lines.Where(l => l.Action != CloseAction.Run).ToList();
         var commands = lines.Where(l => l.Action == CloseAction.Run).Select(l => l.Details).ToList();
-        Logger.Write($"Close apps: {entries.Count} app(s) to close ({entries.Count(e => e.Action == CloseAction.Kill)} with kill), {commands.Count} command(s) to run.");
+        Logger.Write($"Close apps: {entries.Count} app(s) to close, {commands.Count} command(s) to run.");
 
         // Run commands: start them all (in parallel, each on its own STA thread), one time only.
         var starts = commands.Select(async details =>
@@ -135,12 +134,11 @@ internal static class AppCloser
             .Select(l =>
             {
                 var e = l.Details;
-                bool kill = l.Action == CloseAction.Kill;
                 var id = CloseList.Identity(e);
                 bool byPath = id.Contains('\\') || id.Contains('/');
                 var name = Path.GetFileName(id);
                 if (name.EndsWith(".exe")) name = name[..^4];
-                return (Entry: e, Kill: kill, ByPath: byPath, Path: id, Name: name);
+                return (Entry: e, ByPath: byPath, Path: id, Name: name);
             })
             .ToList();
 
@@ -162,7 +160,7 @@ internal static class AppCloser
                         path ??= Native.GetProcessPath(p.Id)?.ToLowerInvariant() ?? "";
                         if (path != t.Path) continue;
                     }
-                    result.Add(new Tracked { Process = p, Entry = t.Entry, Kill = t.Kill, Name = p.ProcessName + ".exe" });
+                    result.Add(new Tracked { Process = p, Entry = t.Entry, Name = p.ProcessName + ".exe" });
                     keep = true;
                     break;
                 }
@@ -173,10 +171,10 @@ internal static class AppCloser
         return result;
     }
 
-    /// <summary>Round 0: WM_CLOSE. Round 1+: WM_CLOSE + shutdown messages. Last round of a kill line: kill.</summary>
+    /// <summary>Round 0: WM_CLOSE. Then WM_CLOSE + shutdown messages. Last round: kill.</summary>
     private static void SendClose(Tracked t, int round)
     {
-        if (t.Kill && round == Rounds - 1)
+        if (round == Rounds - 1)
         {
             try
             {
@@ -191,7 +189,7 @@ internal static class AppCloser
         if (windows.Count == 0)
         {
             if (!t.NoWindowLogged)
-                Logger.Warn($"Close apps: {t} has no window, can not send WM_CLOSE{(t.Kill ? " (it will be killed at 20 s)" : "")}.");
+                Logger.Warn($"Close apps: {t} has no window, can not send WM_CLOSE (it will be killed at {RoundTime.TotalSeconds * (Rounds - 1):0} s).");
             t.NoWindowLogged = true;
             return;
         }
