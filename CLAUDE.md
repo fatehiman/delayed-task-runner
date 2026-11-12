@@ -9,17 +9,20 @@ C# .NET 8 WinForms rewrite of an old VB6 tray app. See [README.md](README.md) fo
 - `PauseForm.cs` – pause window (manual mode): Continue / Next / Ignore this / Exit. Talks to the runner via `IPauseHost`.
   Next launches on a background STA thread (`Launcher.RunAsync`) and waits only for the launch.
 - `EditorForm.cs` – editor mode: `ListView` with checkboxes, right-click Run / Open folder, Fetch icons (shell icons via `Native.GetSmallIcon`, read on a background thread), Save/Cancel.
+- `CloseList.cs` – read/save `close-apps.conf` and build the Close list rows (task-list files first, then add-on apps).
+- `CloseListForm.cs` – modal Close list window (checkboxes, Save/Cancel). Reads the conf file again every time.
+- `AppCloser.cs` – Close apps: `WM_CLOSE` to all top-level windows of matching processes, retry at 10 s / 20 s, stop at 30 s, never kills.
 - `IconCache.cs` – saved icons as PNG in `%LOCALAPPDATA%\DelayedTaskRunner\icons`, key = SHA1 of the task's file text. Loaded when the editor opens, never re-checked; only Fetch icons replaces them.
 - `TaskFile.cs` – parse/save `DelayedTaskRunner.txt`. Save only changes the `#` of changed task lines; CRLF, no BOM.
 - `Launcher.cs` – splits command into file + args, resolves it (also via PATH), starts it with `ShellExecuteEx` (no-focus show modes).
-- `AutoStart.cs` – HKCU Run key. `Logger.cs` – small log, rotated at 1 MB.
+- `AutoStart.cs` – HKCU Run key. `Logger.cs` – small log, rotated at 1 MB (`Warn`/`Error` add a `WARNING:`/`ERROR:` prefix).
 
 ## Rules
 
 - **Never run the installed `E:\appServices\DelayedTaskRunnerHome\DelayedTaskRunner.exe` without arguments to test.**
   It starts every task of the real file (VMs, mounts, many apps). Test with a copy of the exe in a temp folder
   with its own test `DelayedTaskRunner.txt`. Editor mode (`/edit`) is safe, but Save writes the real file.
-- Do not commit the real `DelayedTaskRunner.txt` (public repo). Use `DelayedTaskRunner.sample.txt`.
+- Do not commit the real `DelayedTaskRunner.txt` or `close-apps.conf` (public repo). Use `DelayedTaskRunner.sample.txt`.
 - **Every time you compile a new version, use `.\build.ps1 -Install`** so the installed exe is always overwritten
   (it renames the old exe to `.old` and copies the new one).
   The original VB6 exe is kept as `DelayedTaskRunner.exe.bak-20261024-165641` in the install folder; do not delete it.

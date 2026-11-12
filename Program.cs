@@ -62,6 +62,7 @@ internal static class Paths
     public static readonly string Home = Path.GetDirectoryName(ExePath)!;
     public static readonly string TaskFile = Path.Combine(Home, "DelayedTaskRunner.txt");
     public static readonly string LogFile = Path.Combine(Home, "DelayedTaskRunner.log");
+    public static readonly string CloseAppsFile = Path.Combine(Home, "close-apps.conf");
 }
 
 internal static class AppIcon

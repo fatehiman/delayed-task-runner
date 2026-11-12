@@ -90,4 +90,67 @@ internal static class Native
         }
         finally { DestroyIcon(info.hIcon); }
     }
+    // ---- Close apps ----
+
+    private const uint WM_CLOSE = 0x0010;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder name, int max);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, System.Text.StringBuilder name, ref int size);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    /// <summary>All top-level windows of a process (also hidden ones, like tray apps have), without IME windows.</summary>
+    public static List<IntPtr> GetTopLevelWindows(int processId)
+    {
+        var result = new List<IntPtr>();
+        var cls = new System.Text.StringBuilder(256);
+        EnumWindows((hWnd, _) =>
+        {
+            GetWindowThreadProcessId(hWnd, out uint pid);
+            if (pid != processId) return true;
+            cls.Clear();
+            GetClassNameW(hWnd, cls, cls.Capacity);
+            var name = cls.ToString();
+            if (name != "IME" && name != "MSCTFIME UI") result.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    /// <summary>Posts WM_CLOSE (does not wait). Returns null on success, or the Windows error text.</summary>
+    public static string? PostClose(IntPtr hWnd) =>
+        PostMessageW(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero) ? null : new Win32Exception(Marshal.GetLastWin32Error()).Message;
+
+    /// <summary>Full exe path of a process, or null when it can not be read.</summary>
+    public static string? GetProcessPath(int processId)
+    {
+        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024);
+            int size = sb.Capacity;
+            return QueryFullProcessImageNameW(h, 0, sb, ref size) ? sb.ToString(0, size) : null;
+        }
+        finally { CloseHandle(h); }
+    }
 }

@@ -6,3 +6,5 @@ dist/
 DelayedTaskRunner.txt
 *.log
 *.log.old
+close-apps.conf
+.claude/settings.local.json

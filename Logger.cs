@@ -21,6 +21,10 @@ internal static class Logger
         catch { /* log is optional */ }
     }
 
+    public static void Warn(string message) => Write("WARNING: " + message);
+
+    public static void Error(string message) => Write("ERROR: " + message);
+
     public static void Write(string message)
     {
         if (_path == null) return;

@@ -54,6 +54,17 @@ DelayedTaskRunner.exe /edit
   click **Fetch icons** again to refresh them. Files that are not found get no new icon (a saved one stays).
   To clear all saved icons, delete that folder.
 - **Save**: write the file and close. **Cancel** (or the X button): close without saving.
+- **Close list** (bottom left): opens a window with the apps to close (see [The close list](#the-close-list)).
+  Check or uncheck apps, then **Save** (writes `close-apps.conf`) or **Cancel**.
+- **Close apps** (bottom left): after a Yes/No question, closes the checked apps of `close-apps.conf`, then the editor exits.
+  - The whole window is locked while it runs (also the X button). Changes in the task list are **not** saved.
+  - It sends `WM_CLOSE` to all top-level windows (also hidden ones) of each running app, all apps at once
+    (the same as `taskkill` without `/F`). The app can still ask "Save changes?".
+  - Apps that are still running get `WM_CLOSE` again after 10 s and after 20 s.
+  - The editor exits when all apps are closed, or after **30 s** at most. It never kills an app.
+  - Every step goes to the log. An app that is still running after 30 s is logged as `WARNING: ... NOT closed`.
+  - Known limits: an app with no window (console / service apps) can not get `WM_CLOSE` (logged as a warning).
+    An app that runs as administrator can not get it from a normal app (logged as an error).
 - Save changes only the `#` in front of the changed lines. All other lines (comments, order, spacing) stay the same.
 
 Only one copy of the app can run (in both modes). A second copy shows "DelayedTaskRunner is already running." and exits.
@@ -80,9 +91,34 @@ Only one copy of the app can run (in both modes). A second copy shows "DelayedTa
 - The working folder of each program is the folder of its exe.
 - Use CRLF line endings.
 
+## The close list
+
+`close-apps.conf`, in the same folder as the exe. It is read again every time you click **Close list** or **Close apps**.
+
+```
+; comment
+E:ppServices\stretchly\stretchly.exe
+C:\Program Files\Some Apppp.exe
+chrome.exe
+#E:	ools\other.exe
+```
+
+- One app per line, without quotes and arguments.
+  - A full path: only that exe is closed.
+  - Only a name (like `chrome.exe`): that exe is closed in any folder.
+- `#` in front = unchecked (kept in the list, but not closed). `;` = comment.
+- The Close list window shows first every file of the task list (each file once, checked and unchecked tasks),
+  then the **add-on apps**: lines of `close-apps.conf` that are not in the task list (you add them by hand).
+- Save writes: the checked task-list apps, then all add-on apps.
+  An unchecked task-list app is **removed** from the file. An unchecked add-on app **stays**, with `#` in front.
+  `;` comments stay at the top of the file.
+- `.bat` / `.cmd` / other non-exe files are shown in gray: they are not running apps, so there is nothing to close.
+  To close what a batch file started, add that exe by hand.
+
 ## Log
 
-`DelayedTaskRunner.log` in the same folder. One line per event (start, each task, errors, pause, exit).
+`DelayedTaskRunner.log` in the same folder. One line per event (start, each task, errors, pause, exit, close apps).
+Problems start with `WARNING:` or `ERROR:`.
 If the app crashes, it shows an error box and writes a `CRASH:` line with the full error text.
 When it is bigger than 1 MB, it is renamed to `DelayedTaskRunner.log.old` at the next start.
 

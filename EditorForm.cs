@@ -12,6 +12,12 @@ internal sealed class EditorForm : Form
     private readonly ImageList _icons;
     private readonly Button _fetch;
     private readonly Label _fetchStatus;
+    private readonly Button _closeApps;
+    private readonly Button _closeList;
+    private readonly Label _closeStatus;
+    private readonly List<Button> _allButtons = new();
+    private bool _closingApps;   // "Close apps" is running: the window is locked
+    private bool _closeAppsDone; // "Close apps" finished: now the window may close
 
     public EditorForm()
     {
@@ -68,26 +74,44 @@ internal sealed class EditorForm : Form
         var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(90, 30) };
         _fetch = new Button { Text = "Fetch icons", AutoSize = true, MinimumSize = new Size(90, 30) };
         _fetchStatus = new Label { AutoSize = true, Margin = new Padding(12, 8, 3, 0) };
+        _closeApps = new Button { Text = "Close apps", AutoSize = true, MinimumSize = new Size(90, 30) };
+        _closeList = new Button { Text = "Close list", AutoSize = true, MinimumSize = new Size(90, 30) };
+        _closeStatus = new Label { AutoSize = true, Margin = new Padding(12, 8, 3, 0) };
+        _closeApps.Click += (_, _) => CloseApps();
+        _closeList.Click += (_, _) => EditCloseList();
+        _allButtons.AddRange(new[] { save, cancel, _fetch, _closeApps, _closeList });
         save.Click += (_, _) => SaveAndClose();
         cancel.Click += (_, _) => Close();
         _fetch.Click += (_, _) => FetchIcons();
         AcceptButton = save;
         CancelButton = cancel;
 
-        var buttons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = true,
-            Padding = new Padding(8),
-        };
-        buttons.Controls.Add(cancel);
-        buttons.Controls.Add(save);
-        buttons.Controls.Add(_fetch);
-        buttons.Controls.Add(_fetchStatus);
+        // Bottom bar: Close apps / Close list on the left, Fetch icons / Save / Cancel on the right.
+        var left = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill, Margin = Padding.Empty };
+        left.Controls.Add(_closeApps);
+        left.Controls.Add(_closeList);
+        left.Controls.Add(_closeStatus);
+
+        var right = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+        right.Controls.Add(cancel);
+        right.Controls.Add(save);
+        right.Controls.Add(_fetch);
+        right.Controls.Add(_fetchStatus);
+
+        var buttons = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 2, RowCount = 1, Padding = new Padding(8) };
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        buttons.Controls.Add(left, 0, 0);
+        buttons.Controls.Add(right, 1, 0);
 
         Controls.Add(_list);
         Controls.Add(buttons);
+
+        // While "Close apps" runs, the window can not be closed (only Windows shutdown can close it).
+        FormClosing += (_, e) =>
+        {
+            if (_closingApps && !_closeAppsDone && e.CloseReason != CloseReason.WindowsShutDown) e.Cancel = true;
+        };
 
         try
         {
@@ -189,7 +213,64 @@ internal sealed class EditorForm : Form
         foreach (var icon in found.Select(f => f.Icon).Distinct()) icon.Dispose();
 
         _fetchStatus.Text = $"Icons: {found.Count} of {work.Count}";
-        _fetch.Enabled = true;
+        _fetch.Enabled = !_closingApps;
+    }
+
+    /// <summary>Opens the modal close list window (close-apps.conf is read again every time).</summary>
+    private void EditCloseList()
+    {
+        var tasks = _list.Items.Cast<ListViewItem>()
+            .Select(i => (((TaskItem)i.Tag!).Command, i.ImageIndex))
+            .ToList();
+        using var form = new CloseListForm(tasks, _icons);
+        form.ShowDialog(this);
+    }
+
+    /// <summary>
+    /// Locks the window, closes the checked apps of close-apps.conf (see <see cref="AppCloser"/>),
+    /// then closes this app: when all apps are closed, or after 30 s at most. Task list changes are not saved.
+    /// </summary>
+    private async void CloseApps()
+    {
+        List<string> apps;
+        try
+        {
+            apps = CloseList.Read(Paths.CloseAppsFile).Apps.Where(a => a.Checked).Select(a => a.File).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Can not read {Paths.CloseAppsFile}: {ex.Message}");
+            MessageBox.Show(this, $"Can not read the close list:\n{Paths.CloseAppsFile}\n\n{ex.Message}",
+                Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (apps.Count == 0)
+        {
+            MessageBox.Show(this, "The close list is empty. Use \"Close list\" to check the apps to close.",
+                Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(this, $"Close {apps.Count} app(s) of the close list, then exit?",
+                Program.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+
+        _closingApps = true;
+        _list.Enabled = false;
+        foreach (var b in _allButtons) b.Enabled = false;
+        _closeStatus.Text = "Closing apps...";
+
+        try
+        {
+            await AppCloser.CloseAllAsync(apps, text => { if (!IsDisposed) _closeStatus.Text = text; });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Close apps failed: " + ex);
+        }
+
+        _closeAppsDone = true;
+        if (!IsDisposed) Close();
     }
 
     private void RunSelected()
